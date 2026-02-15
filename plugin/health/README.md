@@ -46,6 +46,26 @@ net {
 
 Doing this is supported but both endpoints ":8080" and ":8081" will export the exact same health.
 
+## Plugin Integration
+
+Plugins can participate in the health check by implementing the `HealthChecker`
+interface:
+
+~~~ go
+type HealthChecker interface {
+    Healthy() bool
+}
+~~~
+
+Any plugin in the same server block that implements `Healthy() bool` is
+discovered automatically at startup — no registration call is needed. If
+`Healthy` returns false for any plugin, `/health` returns a **503** status
+code. When no plugins implement `HealthChecker`, the endpoint behaves exactly
+as before, always returning 200.
+
+This is the same discovery mechanism used by the *ready* plugin's `Readiness`
+interface.
+
 ## Metrics
 
 If monitoring is enabled (via the *prometheus* plugin) then the following metrics are exported:

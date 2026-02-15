@@ -21,6 +21,8 @@ type health struct {
 	lameduck  time.Duration
 	healthURI *url.URL
 
+	checkers []namedChecker // plugins that contribute to the health decision
+
 	ln      net.Listener
 	srv     *http.Server
 	nlSetup bool
@@ -58,9 +60,14 @@ func (h *health) OnStartup() error {
 	h.nlSetup = true
 
 	h.mux.HandleFunc(h.healthURI.Path, func(w http.ResponseWriter, r *http.Request) {
-		// We're always healthy.
-		w.WriteHeader(http.StatusOK)
-		io.WriteString(w, http.StatusText(http.StatusOK))
+		if ok, unhealthy := h.aggregateHealth(); ok {
+			w.WriteHeader(http.StatusOK)
+			io.WriteString(w, http.StatusText(http.StatusOK))
+		} else {
+			log.Warningf("Plugins not healthy: %q", unhealthy)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			io.WriteString(w, unhealthy)
+		}
 	})
 
 	ctx := context.Background()

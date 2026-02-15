@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/coredns/caddy"
+	"github.com/coredns/coredns/core/dnsserver"
 	"github.com/coredns/coredns/plugin"
 )
 
@@ -18,6 +19,21 @@ func setup(c *caddy.Controller) error {
 	}
 
 	h := &health{Addr: addr, lameduck: lame}
+
+	// Discover HealthChecker plugins after MakeServers has populated the handler
+	// registry. This mirrors how the ready plugin discovers Readiness plugins.
+	// Must be registered before h.OnStartup so checkers are populated before
+	// the HTTP server begins accepting requests.
+	collectCheckers := func() {
+		h.checkers = nil
+		for _, p := range dnsserver.GetConfig(c).Handlers() {
+			if hc, ok := p.(HealthChecker); ok {
+				h.checkers = append(h.checkers, namedChecker{name: p.Name(), checker: hc})
+			}
+		}
+	}
+	c.OnStartup(func() error { collectCheckers(); return nil })
+	c.OnRestartFailed(func() error { collectCheckers(); return nil })
 
 	c.OnStartup(h.OnStartup)
 	c.OnRestart(h.OnReload)

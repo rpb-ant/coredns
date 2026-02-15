@@ -45,3 +45,74 @@ func TestHealthLameduck(t *testing.T) {
 
 	h.OnFinalShutdown()
 }
+
+// testChecker is a HealthChecker implementation for testing.
+type testChecker struct{ healthy bool }
+
+func (tc *testChecker) Healthy() bool { return tc.healthy }
+
+func TestHealthCheckers(t *testing.T) {
+	tests := []struct {
+		name       string
+		checkers   []namedChecker
+		wantStatus int
+		wantBody   string
+	}{
+		{
+			name:       "no checkers returns 200",
+			wantStatus: http.StatusOK,
+			wantBody:   "OK",
+		},
+		{
+			name: "all healthy returns 200",
+			checkers: []namedChecker{
+				{name: "foo", checker: &testChecker{true}},
+				{name: "bar", checker: &testChecker{true}},
+			},
+			wantStatus: http.StatusOK,
+			wantBody:   "OK",
+		},
+		{
+			name: "one unhealthy returns 503 with name",
+			checkers: []namedChecker{
+				{name: "foo", checker: &testChecker{true}},
+				{name: "bar", checker: &testChecker{false}},
+			},
+			wantStatus: http.StatusServiceUnavailable,
+			wantBody:   "bar",
+		},
+		{
+			name: "all unhealthy returns 503 with names",
+			checkers: []namedChecker{
+				{name: "foo", checker: &testChecker{false}},
+				{name: "bar", checker: &testChecker{false}},
+			},
+			wantStatus: http.StatusServiceUnavailable,
+			wantBody:   "foo,bar",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := &health{Addr: ":0", checkers: tt.checkers}
+			if err := h.OnStartup(); err != nil {
+				t.Fatalf("OnStartup: %v", err)
+			}
+			defer h.OnFinalShutdown()
+
+			resp, err := http.Get(fmt.Sprintf("http://%s/health", h.ln.Addr()))
+			if err != nil {
+				t.Fatalf("GET /health: %v", err)
+			}
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+
+			if resp.StatusCode != tt.wantStatus {
+				t.Errorf("status = %d, want %d", resp.StatusCode, tt.wantStatus)
+			}
+			if string(body) != tt.wantBody {
+				t.Errorf("body = %q, want %q", string(body), tt.wantBody)
+			}
+		})
+	}
+}
